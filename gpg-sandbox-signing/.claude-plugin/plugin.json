@@ -1,0 +1,6 @@
+{
+  "name": "gpg-sandbox-signing",
+  "version": "1.0.0",
+  "description": "GPG commit signing that keeps pre-commit hooks sandboxed",
+  "author": { "name": "Duy Nguyen" }
+}
