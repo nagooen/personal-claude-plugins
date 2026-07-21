@@ -1,0 +1,7 @@
+{
+  "name": "security-sweep",
+  "version": "0.1.0",
+  "description": "Post-fix, single-vulnerability-class codebase sweep driven by data-only playbooks.",
+  "author": { "name": "Duy Nguyen" },
+  "skills": "./skills"
+}
