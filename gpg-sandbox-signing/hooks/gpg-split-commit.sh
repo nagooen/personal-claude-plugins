@@ -1,8 +1,8 @@
 #!/bin/bash
 # gpg-split-commit.sh — PreToolUse:Bash hook.
-# Intercepts `git commit` commands and rewrites them to use safe-commit.sh,
-# which commits unsigned inside the sandbox. The PostToolUse hook then
-# amends with a GPG signature outside the sandbox.
+# Detects `git commit` commands and temporarily disables GPG signing
+# so the commit can succeed inside Claude Code's sandbox (which blocks
+# ~/.gnupg/ access). A PostToolUse hook then amends with GPG signature.
 #
 # Does NOT intercept:
 #   - git commit --amend (used by the GPG signing step itself)
@@ -15,8 +15,8 @@ fi
 
 set -euo pipefail
 
-PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SAFE_COMMIT="$PLUGIN_DIR/hooks/safe-commit.sh"
+DEBUG_LOG="${TMPDIR:-/tmp}/.gpg-hook-debug.log"
+MARKER="${TMPDIR:-/tmp}/.claude-pending-gpg-sign"
 
 INPUT=$(cat)
 CMD=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
@@ -33,38 +33,42 @@ case "$MATCH_CMD" in
   rtk\ git\ commit*) MATCH_CMD="${MATCH_CMD#rtk }" ;;
 esac
 
-# Must be a git commit command
-if ! echo "$MATCH_CMD" | grep -qE '(^|&&\s*|;\s*)git\s+commit([[:space:]]|$)'; then
+# Must be a git commit command. Matches with or without an rtk prefix, and
+# whether the commit leads the command or follows a separator — e.g.
+# `export PATH=...; rtk git commit -m x`, which the rtk strip above misses
+# because it only anchors at the start of the string.
+if ! echo "$MATCH_CMD" | grep -qE '(^|&&[[:space:]]*|;[[:space:]]*)(rtk[[:space:]]+)?git[[:space:]]+commit([[:space:]]|$)'; then
   exit 0
 fi
 
-# Skip if it's an amend (our own Step 2, or user-initiated amend)
+# Skip if it's an amend (our own PostToolUse step, or user-initiated amend)
 if echo "$MATCH_CMD" | grep -qE 'git\s+commit\s+.*--amend'; then
   exit 0
 fi
 
 # Skip if already bypassing GPG (avoid double-wrapping)
-if echo "$CMD" | grep -qE 'commit\.gpgsign=false|--no-gpg-sign|safe-commit\.sh'; then
+if echo "$CMD" | grep -qE 'commit\.gpgsign=false|--no-gpg-sign'; then
   exit 0
 fi
 
-# --- Rewrite ---
+# --- Block commits on main/master ---
+BRANCH=$(git branch --show-current 2>/dev/null || echo "")
+if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
+  echo "BLOCKED: You are on the $BRANCH branch. Switch to a feature branch first." >&2
+  exit 1
+fi
 
-# Extract everything after `git commit` to pass as args to safe-commit.sh
-# Handle both `git commit -m "msg"` and `rtk git commit -m "msg"`
-REWRITTEN=$(echo "$CMD" | sed -E "s|(rtk )?git commit|$SAFE_COMMIT|")
+# --- Disable GPG signing temporarily ---
+echo "[gpg-pre] Disabling GPG for sandbox commit at $(date)" >> "$DEBUG_LOG"
 
-# Build updated tool_input preserving all original fields
-ORIGINAL_INPUT=$(echo "$INPUT" | jq -c '.tool_input')
-UPDATED_INPUT=$(echo "$ORIGINAL_INPUT" | jq --arg cmd "$REWRITTEN" '.command = $cmd')
+# Save current HEAD so PostToolUse can detect if a new commit was made
+PRE_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "none")
+echo "$PRE_HEAD" > "$MARKER"
 
-jq -n \
-  --argjson updated "$UPDATED_INPUT" \
-  '{
-    "hookSpecificOutput": {
-      "hookEventName": "PreToolUse",
-      "permissionDecision": "allow",
-      "permissionDecisionReason": "GPG split-commit: unsigned commit inside sandbox",
-      "updatedInput": $updated
-    }
-  }'
+# Disable GPG signing locally (hook runs outside sandbox, can write .git/config)
+git config --local commit.gpgsign false
+
+echo "[gpg-pre] GPG disabled, marker=$PRE_HEAD" >> "$DEBUG_LOG"
+
+# Exit 0 with no stdout = allow command through unchanged
+exit 0
