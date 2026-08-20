@@ -154,6 +154,10 @@ being redefined per child.
 
 Apply Rule 4. Every mismatch is either a ticket correction or an Open Item.
 
+Rule 4 compares this ticket against the code. It does not compare it against the ticket on the
+other side of the wire. If this ticket is one side of a frontend/backend boundary and another
+ticket owns the other side: invoke the `contract-sync` skill.
+
 ### Step 7 — Acceptance criteria
 
 GIVEN / WHEN / THEN. Testable, and matching shipped behaviour where it exists.
@@ -205,6 +209,10 @@ rather than redefining — divergent redefinitions are how "tier 2" comes to mea
 - Same concept, same name everywhere
 - Same literal value everywhere (a flag key spelled two ways is a bug waiting)
 - Same structure, so a reader moving between children knows where to look
+
+If children span frontend and backend, naming consistency is not enough — the two sides can agree
+on every term and still disagree on the wire shape, the casing, the optionality and the rollout
+flag. Invoke the `contract-sync` skill.
 
 ### Step 4 — Gaps and overlaps
 
@@ -316,6 +324,7 @@ Grooming is complete when:
 - `jira` (conditional: for field mappings, MCP parameters, URL extraction)
 - `acceptance-criteria` (conditional: when AC need rework, not just reformatting)
 - `owasp-triage` (conditional: when the Security section is missing or stale)
+- `contract-sync` (conditional: when the epic or ticket spans frontend and backend)
 
 **This skill is invoked by:**
 - Users, before picking up a ticket that reads badly
@@ -323,7 +332,7 @@ Grooming is complete when:
 
 **Skill type:** Workflow (Level 2)
 **Dependency depth:** 1 (invokes Foundation and Definition skills only)
-**Context cost:** ~400 lines self; ~1,200 with all three conditional dependencies
+**Context cost:** ~410 lines self; ~1,600 with all four conditional dependencies
 **Circular risk:** None — nothing referenced here references this back
 
 ---

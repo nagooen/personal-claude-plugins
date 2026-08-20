@@ -19,12 +19,18 @@ Four failure modes, ordered by what they actually cost:
 The first two are the expensive ones. They do not read as errors — they read as a working
 ticket — and they produce bugs that compile.
 
+Across a vertical stack there is a fifth, and it is quieter still: the frontend ticket and the
+backend ticket describe the same contract differently. Both read as complete, and the code each
+side writes compiles.
+
 ## Usage
 
 ```
 groom: ES-62195              # ticket pass
 groom: ES-61993              # epic pass
 groom: ES-61993 --children   # epic pass, then report which children need work
+
+contract-sync: ES-61993      # sweep every frontend/backend boundary in the epic
 ```
 
 ## What it does
@@ -34,6 +40,12 @@ a table, defines the ticket's jargon, and reconciles the description against shi
 
 **Epic pass** — coherence across children: one glossary, consistent naming, gaps and overlaps,
 and whether the dependency order still holds.
+
+**Contract sync** — ticket against ticket, rather than ticket against code. One row per field,
+one column per ticket, one column for what shipped, and three verdicts: agree, drift, silence.
+Covers casing and optionality at the wire boundary, the unhappy paths both sides must state,
+whether the rollout shares one flag key, and which ticket swaps out the stub. `groom` invokes it
+when an epic's children span frontend and backend.
 
 It never writes to Jira without approval. A description edit replaces the whole body and Jira
 has no version check, so the workflow drafts, re-checks the `updated` timestamp, and only then
