@@ -1,0 +1,6 @@
+{
+  "name": "ticket-grooming",
+  "version": "1.0.0",
+  "description": "Groom existing Jira epics and tickets so someone can build from them",
+  "author": { "name": "Duy Nguyen" }
+}
