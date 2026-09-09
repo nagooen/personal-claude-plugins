@@ -44,8 +44,8 @@ committed:
 
 ```json
 {
-  "web-frontend": {
-    "worker": { "email": "you.worker+dev@example.com", "password": "..." }
+  "<project>": {
+    "<persona>": { "email": "you+dev@example.com", "password": "..." }
   }
 }
 ```
@@ -61,5 +61,5 @@ delete.
 ## Usage
 
 ```
-browser-verify: confirm ES-63076 works
+browser-verify: confirm the checkout fix works
 ```
