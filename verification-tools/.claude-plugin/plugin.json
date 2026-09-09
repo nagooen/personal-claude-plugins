@@ -1,0 +1,6 @@
+{
+  "name": "verification-tools",
+  "version": "1.0.0",
+  "description": "Verify a change in a real browser and report only what was observed",
+  "author": { "name": "Duy Nguyen" }
+}
