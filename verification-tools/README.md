@@ -39,8 +39,11 @@ account that passes it. Saying so is the point, not a shortfall.
 
 ## Setup
 
-Credentials come from `~/.claude/test-accounts.json`, outside every repo so it cannot be
-committed:
+Playwright MCP is required — `claude mcp add playwright --scope user -- npx -y
+@playwright/mcp@latest` — and its tools only load at session start, so install then restart.
+
+Credentials live in `~/.claude/test-accounts.json`, outside every repo so it cannot be
+committed. `chmod 600` it:
 
 ```json
 {
@@ -50,13 +53,41 @@ committed:
 }
 ```
 
-`chmod 600` it. Playwright MCP is required — `claude mcp add playwright --scope user -- npx
--y @playwright/mcp@latest` — and its tools only load at session start, so install then
-restart.
+## The agent never sees that file
 
-Note that Playwright writes DOM snapshots to `~/.playwright-mcp/` which capture typed
-passwords in plaintext. The skill's last step checks for that and tells you which files to
-delete.
+Handing an agent a password puts it in the transcript, and Playwright then writes DOM
+snapshots to `~/.playwright-mcp/` that capture typed passwords in plaintext. So the login
+happens outside the conversation instead.
+
+You run the seed script. It reads the credentials locally, logs in through the real form, and
+exits. Chrome keeps the session in its own profile, so the agent opens that profile and is
+already authenticated:
+
+```bash
+node scripts/seed-browser-session.mjs \
+  --project web-frontend --persona worker \
+  --url http://localhost:8200/login --clear-stale-lock
+```
+
+It finds the Playwright MCP profile itself, detects the login form by input type rather than
+by project-specific test ids, and is idempotent — an existing session short-circuits unless
+you pass `--force`. Its output names the profile, where it landed, and whether a session key
+was written. It never prints the password or the token.
+
+Two things worth knowing:
+
+- **Chrome allows one process per profile.** The script and the agent's browser cannot both
+  hold it, so the script must exit before the agent connects. If a previous Chrome died and
+  left a lock behind, `--clear-stale-lock` removes it once it has confirmed the owning
+  process is gone.
+- **`--force` clears the session first.** Without that it could never log in again: a live
+  session makes the app redirect straight off the login route, so the form never renders.
+
+The skill still checks `~/.playwright-mcp/` for leaked passwords at the end, because an
+earlier session — or a human logging in by hand in the same profile — can still leave one.
+
+Needs `playwright-core`, which it finds in the Playwright MCP's own npx cache or any nearby
+`node_modules`. If it cannot, it tells you the one command to run.
 
 ## Usage
 

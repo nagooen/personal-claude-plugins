@@ -1,6 +1,6 @@
 ---
 name: browser-verify
-description: Verify a change in a real browser. Discovers the project's dev-server and environment config, runs the change's own tests as the contract, logs in from a local credentials file, then proves the code path ran using Playwright network payloads and screenshots. Reports partial verification honestly rather than passing a green suite off as browser-verified.
+description: Verify a change in a real browser. Discovers the project's dev-server and environment config, runs the change's own tests as the contract, drives a browser session seeded outside the conversation so no password is ever read, then proves the code path ran using Playwright network payloads and screenshots. Reports partial verification honestly rather than passing a green suite off as browser-verified.
 ---
 
 # Browser Verify Skill
@@ -33,17 +33,26 @@ claude mcp add playwright --scope user -- npx -y @playwright/mcp@latest
 
 Tell the user to restart, then stop. Installing and then pretending to verify is worse than not starting.
 
-**2. Credentials file** at `~/.claude/test-accounts.json`, keyed by project then persona:
+**2. A seeded browser session.** You do not log in, and you never read the credentials file.
 
-```json
-{
-  "<project>": {
-    "<persona>": { "email": "someone+dev@example.com", "password": "..." }
-  }
-}
+The human runs `scripts/seed-browser-session.mjs`, which reads `~/.claude/test-accounts.json`
+locally, logs in through the real form, and exits. Chrome keeps the session in its profile, so
+you inherit an authenticated browser:
+
+```bash
+node scripts/seed-browser-session.mjs \
+  --project <project> --persona <persona> --url <login-url> --clear-stale-lock
 ```
 
-Read it with the Read tool. If it is missing, or has no entry for this project, print the schema and stop — never ask the user to paste a password into the conversation.
+It prints the profile it chose, where it landed, and whether the session key was set — never a
+password and never a token.
+
+**You must not read `~/.claude/test-accounts.json`, and must not ask for a password.** Reading it
+puts the password in the transcript and in any DOM snapshot taken afterwards, which is the exact
+leak Step 11 exists to clean up. If no session is seeded, print the command above and stop.
+
+Chrome allows one process per profile, so the script and your browser cannot both hold it. If the
+script reports the profile is busy, close the browser (`browser_close`) and let the human re-run.
 
 **3. A checkout** with dependencies installed.
 
@@ -61,7 +70,8 @@ Discover these before anything else. Do not guess any of them, and do not carry 
 | API host per config | The base-URL constant each config exports |
 | Test command | `package.json` scripts, plus the runner's config for path filters |
 | Route table | The router config for the area the change touches |
-| Login selectors | Stable test ids on the login form, not generated class names |
+| Login route | The router config — the human needs it for the seed script, you never post to it |
+| An authenticated route | Somewhere only a signed-in user reaches, to confirm the session |
 
 Report the profile in one short block before proceeding. Everything downstream cites it.
 
@@ -133,22 +143,28 @@ lsof -nP -iTCP:<port> -sTCP:LISTEN -t
 
 Poll in a loop; never a bare foreground `sleep`. A cold build can take from seconds to several minutes.
 
-### Step 6: Log in
+### Step 6: Confirm the inherited session
 
-Pick the persona the change concerns. A provider-facing rule needs the provider account, not the customer one.
+The session is already seeded (Prerequisite 2). Your job is to confirm it, not to create it.
 
 ```
-browser_resize     { width: 1440, height: 900 }
-browser_navigate   { url: "http://localhost:<port>/<login-route>" }
-browser_fill_form  { fields: [ { target: "<email-testid-selector>",    ... },
-                               { target: "<password-testid-selector>", ... } ] }
-browser_click      { target: "<submit-testid-selector>" }
-browser_wait_for   { time: 5 }
+browser_resize    { width: 1440, height: 900 }
+browser_navigate  { url: "http://localhost:<port>/<an-authenticated-route>" }
+browser_wait_for  { time: 5 }
 ```
 
-Prefer stable test-id selectors over snapshot refs — refs go stale after every re-render, and component frameworks re-render constantly.
+Success is landing on the authenticated route rather than being bounced to login. Confirm it
+from something only a signed-in user gets — an authenticated API call returning 200, or
+navigation that only a signed-in role can see. Do not confirm it from the account's profile
+payload: those carry personal data you have no reason to pull into context.
 
-Success looks like a redirect to an authenticated route and a console error count that **drops**. Still on the login route with a rising error count means the request failed; return to Step 4 before doubting the password.
+Then check the persona is the right one. A provider-facing rule needs the provider account, not
+the customer one. Read the role off the navigation or an authorised response, not off a
+profile record.
+
+If you land on the login route instead, **do not try to log in.** Either the seeded session
+expired or the API host is unreachable. Re-check Step 4, then ask the human to re-run the seed
+script with `--force`.
 
 ### Step 7: Reach the changed surface
 
@@ -219,15 +235,23 @@ Separate what you observed from what you inferred, and state plainly which paths
 
 Some paths are structurally unreachable with the data at hand: a blocking rule cannot be shown by an account that passes it. **Say so.** Never let a green suite be reported as browser-verified, and never imply full coverage from a partial run.
 
-### Step 11: Clean up credentials
+### Step 11: Check for credential leakage
 
-Playwright writes DOM snapshots that **contain the typed password in plaintext**:
+Seeding the session outside the conversation removes the main cause of this leak: you never type
+the password, so no DOM snapshot of yours can capture it. Check anyway — an earlier session, or
+a human logging in by hand in the same profile, still leaves snapshots behind.
+
+Never paste the password into the check. Read it into a shell variable and grep with that, so it
+reaches neither the command nor the output:
 
 ```bash
-grep -rl "<password>" ~/.playwright-mcp/ 2>/dev/null
+PW=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.claude/test-accounts.json')))['<project>']['<persona>']['password'])")
+grep -rl -- "$PW" ~/.playwright-mcp/ 2>/dev/null
+unset PW
 ```
 
-Report the matching files and offer to delete them. Do not delete without asking — the user may want the snapshots — but never leave the leak unmentioned.
+Report the matching files and offer to delete them. Do not delete without asking — the user may
+want the snapshots — but never leave the leak unmentioned.
 
 Leave the dev server running unless asked to stop it, and say where it is.
 
@@ -236,7 +260,10 @@ Leave the dev server running unless asked to stop it, and say where it is.
 **Never:**
 - Take an outward action without explicit approval — submitting an application or form, sending a message, paying. These create real records in a shared environment. Getting to the button is verification; pressing it is not yours to decide.
 - Mutate shared environment data to make a case reachable unless the user asks.
-- Echo a password into the conversation, a commit, or a report.
+- Read `~/.claude/test-accounts.json`, or ask for a password. The session is seeded outside the
+  conversation precisely so the credential never enters it.
+- Log in through the form yourself. If the session is missing, say so and stop.
+- Echo a password or a session token into the conversation, a commit, or a report.
 - Claim browser verification on the strength of a passing suite.
 - Report a state's cause without citing the deciding line.
 - Reuse a port, config or route remembered from another project. Rebuild the profile every run.
@@ -260,7 +287,7 @@ Leave the dev server running unless asked to stop it, and say where it is.
 3. The change's suites run: all pass, counts recorded.
 4. The default config's API host does not resolve; a second config's host resolves and returns 200. Serve that one.
 5. Server reaches its ready signal in a visible pane.
-6. Log in as the provider persona → authenticated route, console errors drop to zero.
+6. Confirm the seeded provider session → authenticated route, an authorised call returns 200.
 7. Deep-link to the record id named in the commit message. It requires three services, two of them expressed as category placeholders.
 8. Payloads: the eligibility endpoint returns an allow-list containing two of the required services; two follow-up queries resolve the placeholder categories. All three quoted verbatim.
 9. No warning shown, action enabled. Cause read from the deciding function: an any-match passes on the two allowed services.
@@ -268,15 +295,17 @@ Leave the dev server running unless asked to stop it, and say where it is.
 
 ### Example 2: Recovering from an unreachable backend
 
-*The login "fails".*
+*The seeded session "fails".*
 
-Symptom: still on the login route, console shows `ERR_NAME_NOT_RESOLVED` for the API host.
+Symptom: bounced to the login route, console shows `ERR_NAME_NOT_RESOLVED` for the API host.
 
-Wrong move: re-typing the password, asking for different credentials.
+Wrong move: asking the human to re-seed, or for different credentials.
 
-Right move: `dig +short <host>` → empty. `curl` → exit 6. A sibling config's host resolves. Restart the server on that config, log in unchanged, console errors go to zero.
+Right move: `dig +short <host>` → empty. `curl` → exit 6. A sibling config's host resolves.
+Restart the server on that config, navigate again, the session works untouched.
 
-The credentials were never the problem, and were never tested.
+The credentials were never the problem, and were never involved. The seed script would have
+failed the same way for the same reason — it logs in against the same unreachable host.
 
 ## Success Criteria
 
@@ -286,7 +315,8 @@ Verification is complete when:
 - [ ] The SHA under test is named and confirmed present in the working tree
 - [ ] The affected suites ran, with counts recorded
 - [ ] The served config's API host was proved reachable, and the config is named
-- [ ] Login succeeded, evidenced by the post-login route
+- [ ] The seeded session was confirmed, evidenced by an authenticated route or a 200 from an
+      authorised call — and no credential was read into context
 - [ ] At least one payload from the new code path is quoted verbatim
 - [ ] Screenshots exist, with their real paths listed
 - [ ] Every UI conclusion cites the deciding file and line
