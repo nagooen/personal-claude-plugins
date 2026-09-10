@@ -1,0 +1,28 @@
+{
+  "name": "personal-claude-plugins",
+  "description": "Duy Nguyen's personal Claude Code plugins: commit signing, ticket grooming, and browser verification",
+  "owner": {
+    "name": "Duy Nguyen",
+    "url": "https://github.com/nagooen/personal-claude-plugins"
+  },
+  "plugins": [
+    {
+      "name": "gpg-sandbox-signing",
+      "source": "./gpg-sandbox-signing",
+      "description": "GPG commit signing that keeps pre-commit hooks sandboxed",
+      "version": "1.0.0"
+    },
+    {
+      "name": "ticket-grooming",
+      "source": "./ticket-grooming",
+      "description": "Groom existing Jira epics and tickets so someone can build from them",
+      "version": "1.0.0"
+    },
+    {
+      "name": "verification-tools",
+      "source": "./verification-tools",
+      "description": "Verify a change in a real browser and report only what was observed",
+      "version": "1.0.0"
+    }
+  ]
+}
